@@ -18,8 +18,18 @@ Exports your OpenCode conversation data (sessions, messages, parts, todos, etc.)
 
 ## Installation
 
-Copy the `SKILL.md` and `scripts/` directory into your OpenCode skills folder:
+Copy the `SKILL.md` and `scripts/` directory into the skill folder:
 
+**OpenCode:**
+```
+# Windows
+%USERPROFILE%\.config\opencode\skills\conversation-backup\
+
+# macOS / Linux
+~/.config/opencode/skills/conversation-backup/
+```
+
+**Claude Code:**
 ```
 # Windows
 %USERPROFILE%\.claude\skills\conversation-backup\

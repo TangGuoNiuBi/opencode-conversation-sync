@@ -18,8 +18,18 @@
 
 ## 安装
 
-将 `SKILL.md` 和 `scripts/` 目录复制到 OpenCode skill目录：
+将 `SKILL.md` 和 `scripts/` 目录复制到对应的 skill 目录：
 
+**OpenCode:**
+```
+# Windows
+%USERPROFILE%\.config\opencode\skills\conversation-backup\
+
+# macOS / Linux
+~/.config/opencode/skills/conversation-backup/
+```
+
+**Claude Code:**
 ```
 # Windows
 %USERPROFILE%\.claude\skills\conversation-backup\
