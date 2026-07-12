@@ -1,6 +1,8 @@
 # opencode-conversation-sync
 
-一个 [OpenCode](https://opencode.ai) 技能，用于在不同设备间备份和恢复对话记录。
+[English](./README.md)
+
+一个 [OpenCode](https://opencode.ai) skill，用于在不同设备间备份和恢复对话记录。
 
 ## 功能说明
 
@@ -16,7 +18,7 @@
 
 ## 安装
 
-将 `SKILL.md` 和 `scripts/` 目录复制到 OpenCode 技能目录：
+将 `SKILL.md` 和 `scripts/` 目录复制到 OpenCode skill目录：
 
 ```
 # Windows
@@ -44,7 +46,7 @@
 
 > 对话备份
 
-技能将：
+skill将：
 1. 验证当前为新会话（避免将备份操作本身的数据导出）
 2. 切换到 `conversations-backup` 分支
 3. 将所有对话导出到 `.opencode/conversations.sql`
@@ -57,7 +59,7 @@
 
 > 对话导入
 
-技能将：
+skill将：
 1. 验证当前为新会话
 2. 切换到 `conversations-backup` 分支
 3. 执行 dry-run 预览，展示各表记录数
@@ -73,7 +75,7 @@
 ## 文件结构
 
 ```
-├── SKILL.md                          # 技能定义文件
+├── SKILL.md                          # skill定义文件
 └── scripts/
     ├── check_session.js              # 验证是否为新会话
     ├── export_conversations.js       # 导出对话到 SQL

@@ -1,5 +1,7 @@
 # opencode-conversation-sync
 
+[中文文档](./README.zh-CN.md)
+
 An [OpenCode](https://opencode.ai) skill for backing up and restoring conversation history across devices.
 
 ## What it does
