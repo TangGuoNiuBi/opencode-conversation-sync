@@ -150,6 +150,8 @@ node C:/Users/Administrator/.claude/skills/conversation-backup/scripts/check_ses
 
 ### 流程
 
+**阶段 1：前置检查与预筛选**
+
 1. **执行一次前置检查**（使用当前工作目录）：
 
 ```bash
@@ -159,19 +161,47 @@ node C:/Users/Administrator/.claude/skills/conversation-backup/scripts/check_ses
    - 如果 `is_new_session: false`：终止流程，提示用户新建对话
    - 如果 `is_new_session: true`：继续
 
-2. **依次处理用户指定的目录列表**，对每个目录执行以下步骤：
+2. **预筛选目录列表**：对用户指定的每个目录，检查是否存在且为 git 仓库（`git rev-parse --is-inside-work-tree`），过滤出有效目录，记录跳过的目录
 
-   a. **检查目录是否存在**：不存在则跳过，记录到跳过列表
-   b. **检查是否为 git 仓库**：在目录中执行 `git rev-parse --is-inside-work-tree`，失败则跳过
-   c. **执行单项目导入流程**（与上方「对话导入」章节完全一致）：
-      - 记录当前分支，切换到 `conversations-backup` 分支
-      - 运行 dry-run 预览
-      - 询问用户确认（批量模式下可一次性确认所有目录）
-      - 执行实际导入
-      - 切回原分支
-   d. 记录该目录的执行结果（成功/失败/跳过）
+**阶段 2：切换分支与 dry-run 预览**
 
-3. **汇总报告**：向用户展示所有目录的执行结果，包括：
+3. **依次对每个有效目录执行切分支 + dry-run**（必须串行，每个目录完整执行完**立即自动继续下一个目录，不要等待用户确认**）：
+
+   a. 记录当前分支，切换到 `conversations-backup` 分支：
+   ```bash
+   ORIGINAL_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+   git fetch origin conversations-backup
+   git checkout conversations-backup 2>/dev/null || git checkout -b conversations-backup origin/main
+   ```
+
+   b. 运行 dry-run 预览：
+   ```bash
+   node C:/Users/Administrator/.claude/skills/conversation-backup/scripts/import_conversations.js --dry-run "<项目目录>"
+   ```
+
+   c. 记录该目录的 dry-run 结果和原始分支名，**立即继续处理下一个目录**
+
+4. **所有目录 dry-run 全部完成后**，汇总展示所有目录的 dry-run 结果，使用 `question` 工具一次性询问用户是否确认全部导入
+
+**阶段 3：执行实际导入**
+
+5. **用户确认后，依次对每个目录执行实际导入**（必须串行，每个目录完整执行完再处理下一个）：
+
+   a. 切换到该目录的 `conversations-backup` 分支（如果不在该分支上）
+   b. 执行实际导入：
+   ```bash
+   node C:/Users/Administrator/.claude/skills/conversation-backup/scripts/import_conversations.js --yes "<项目目录>"
+   ```
+   c. **必须展示每个目录的导入命令输出**，不得省略或编造结果
+
+**阶段 4：切回与汇总**
+
+6. **依次切回每个目录的原始分支**：
+   ```bash
+   git checkout $ORIGINAL_BRANCH
+   ```
+
+7. **汇总报告**：向用户展示所有目录的执行结果，包括：
    - 成功导入的目录及各表记录数
    - 跳过的目录及原因
    - 失败的目录及错误信息
