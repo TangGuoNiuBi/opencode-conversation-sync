@@ -55,7 +55,7 @@ node C:/Users/Administrator/.claude/skills/conversation-backup/scripts/export_co
 ```bash
 git add .opencode/conversations.sql
 git commit -m "使用 commit_message 字段的内容"
-git push origin conversations-backup
+git push -u origin conversations-backup
 ```
 
 5. 切回用户原来的分支：
