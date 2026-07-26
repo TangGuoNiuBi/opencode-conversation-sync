@@ -3,17 +3,38 @@ const { DatabaseSync } = require('node:sqlite');
 const os = require('os');
 const path = require('path');
 
+const worktree = process.cwd().replace(/\\/g, '/');
+
 const dbPath = path.join(os.homedir(), '.local', 'share', 'opencode', 'opencode.db');
 const db = new DatabaseSync(dbPath, { readOnly: true });
 
-const session = db.prepare(
-  'SELECT id, title FROM session ORDER BY time_created DESC LIMIT 1'
-).get();
+const project = db.prepare(
+  'SELECT id FROM project WHERE worktree = ?'
+).get(worktree);
+
+let session;
+if (project) {
+  session = db.prepare(
+    'SELECT id, title FROM session WHERE project_id = ? ORDER BY time_created DESC LIMIT 1'
+  ).get(project.id);
+} else {
+  session = db.prepare(
+    'SELECT id, title FROM session ORDER BY time_created DESC LIMIT 1'
+  ).get();
+}
 
 if (!session) {
-  console.log(JSON.stringify({ error: 'No session found' }));
+  console.log(JSON.stringify({
+    session_id: null,
+    session_title: null,
+    user_message_count: 0,
+    first_user_message: '',
+    is_new_session: true,
+    worktree,
+    project_found: !!project,
+  }, null, 2));
   db.close();
-  process.exit(1);
+  process.exit(0);
 }
 
 const sessionId = session.id;
@@ -46,6 +67,8 @@ console.log(JSON.stringify({
   user_message_count: userTexts.length,
   first_user_message: userTexts[0] || '',
   is_new_session: isBackupCommand,
+  worktree,
+  project_found: !!project,
 }, null, 2));
 
 db.close();

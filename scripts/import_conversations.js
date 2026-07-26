@@ -8,17 +8,20 @@ const crypto = require('crypto');
 
 let mode = null;
 let projectDir = null;
+let ignoreExisting = false;
 
 for (const arg of process.argv.slice(2)) {
   if (arg === '--dry-run') mode = 'dry-run';
   else if (arg === '--yes') mode = 'yes';
+  else if (arg === '--ignore-existing') ignoreExisting = true;
   else projectDir = path.resolve(arg);
 }
 
 if (!mode) {
-  console.error('Usage: node import_conversations.js [--dry-run|--yes] [project_dir]');
-  console.error('  --dry-run  Preview import without making changes');
-  console.error('  --yes      Execute the import');
+  console.error('Usage: node import_conversations.js [--dry-run|--yes] [--ignore-existing] [project_dir]');
+  console.error('  --dry-run          Preview import without making changes');
+  console.error('  --yes              Execute the import');
+  console.error('  --ignore-existing  Use INSERT OR IGNORE instead of INSERT OR REPLACE');
   process.exit(1);
 }
 
@@ -68,17 +71,52 @@ sql = replaceAll(sql, '{{PROJECT_ID}}', localProjectId);
 
 const insertCount = (sql.match(/^INSERT /gm) || []).length;
 
+let sessionAnalysis = null;
+if (localProject) {
+  const checkDb = new DatabaseSync(dbPath, { readOnly: true });
+  const localSessions = checkDb.prepare(
+    'SELECT id FROM session WHERE project_id = ?'
+  ).all(localProjectId).map(s => s.id);
+  
+  const sqlSessionIds = [];
+  const sessionInsertMatch = sql.match(/INSERT OR REPLACE INTO session[^;]+VALUES\s*([\s\S]*?);/);
+  if (sessionInsertMatch) {
+    const valuesPart = sessionInsertMatch[1];
+    const idMatches = valuesPart.matchAll(/\('ses_[a-zA-Z0-9]+'/g);
+    for (const m of idMatches) {
+      sqlSessionIds.push(m[0].slice(2, -1));
+    }
+  }
+  
+  const existingSessions = sqlSessionIds.filter(id => localSessions.includes(id));
+  const newSessions = sqlSessionIds.filter(id => !localSessions.includes(id));
+  
+  sessionAnalysis = {
+    sql_session_count: sqlSessionIds.length,
+    existing_count: existingSessions.length,
+    new_count: newSessions.length,
+  };
+  
+  checkDb.close();
+}
+
 console.log(JSON.stringify({
   mode,
   local_worktree: worktree,
   local_project_id: localProjectId,
   insert_count: insertCount,
+  ignore_existing: ignoreExisting,
+  session_analysis: sessionAnalysis,
   header: headerLines.map(l => l.replace(/^-- /, '')),
 }, null, 2));
 
 if (mode === 'dry-run') {
   console.log('\n[DRY RUN] No changes made. Use --yes to execute.');
   process.exit(0);
+}
+
+if (ignoreExisting) {
+  sql = sql.replace(/^INSERT OR REPLACE/gm, 'INSERT OR IGNORE');
 }
 
 const importDb = new DatabaseSync(dbPath);

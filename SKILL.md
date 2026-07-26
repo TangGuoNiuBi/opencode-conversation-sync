@@ -1,6 +1,6 @@
 ---
 name: conversation-backup
-description: 当用户提到"对话备份"时导出当前项目的 opencode 对话记录为 SQL 文件并提交推送到远程仓库；当用户提到"对话导入"时从 SQL 文件导入对话记录到本地 opencode 数据库。
+description: 当用户提到"对话备份"时导出当前项目的 opencode 对话记录为 SQL 文件并提交推送到远程仓库；当用户提到"对话导入"时从 SQL 文件导入对话记录到本地 opencode 数据库；当用户提到"批量对话备份"时批量备份多个项目目录的对话；当用户提到"批量对话导入"时批量导入多个项目目录的对话。
 ---
 
 # 对话备份与导入
@@ -39,18 +39,27 @@ node C:/Users/Administrator/.claude/skills/conversation-backup/scripts/check_ses
 
 ```bash
 ORIGINAL_BRANCH=$(git rev-parse --abbrev-ref HEAD)
-git fetch origin
+git fetch origin conversations-backup
 git checkout conversations-backup 2>/dev/null || git checkout -b conversations-backup origin/main
 ```
 
-2. 运行导出脚本，排除当前对话（将 `<项目目录>` 替换为当前项目的绝对路径，`<session_id>` 替换为前置检查中获取的当前对话 ID）：
+2. **预导入检查**：检查 `.opencode/conversations.sql` 是否存在，如果存在则运行 dry-run 检查是否有本地缺失的会话：
+
+```bash
+node C:/Users/Administrator/.claude/skills/conversation-backup/scripts/import_conversations.js --dry-run --ignore-existing "<项目目录>"
+```
+
+   - 如果 `session_analysis.new_count > 0`：执行预导入（使用 `--yes --ignore-existing`），只添加本地缺失的会话
+   - 如果 `session_analysis.new_count == 0` 或 SQL 文件不存在：跳过预导入
+
+3. 运行导出脚本，排除当前对话（将 `<项目目录>` 替换为当前项目的绝对路径，`<session_id>` 替换为前置检查中获取的当前对话 ID）：
 
 ```bash
 node C:/Users/Administrator/.claude/skills/conversation-backup/scripts/export_conversations.js --exclude-session <session_id> "<项目目录>"
 ```
 
-3. 检查输出的 JSON，确认 `success: true` 并查看各表导出的记录数
-4. 使用输出中的 `commit_message` 字段作为 git commit message，**必须完整使用，不得截断或省略任何内容**（包括各对话详情列表）：
+4. 检查输出的 JSON，确认 `success: true` 并查看各表导出的记录数
+5. 使用输出中的 `commit_message` 字段作为 git commit message，**必须完整使用，不得截断或省略任何内容**（包括各对话详情列表）：
 
 ```bash
 git add .opencode/conversations.sql
@@ -58,13 +67,13 @@ git commit -m "使用 commit_message 字段的内容"
 git push -u origin conversations-backup
 ```
 
-5. 切回用户原来的分支：
+6. 切回用户原来的分支：
 
 ```bash
 git checkout $ORIGINAL_BRANCH
 ```
 
-6. 向用户报告导出结果（各表记录数）
+7. 向用户报告导出结果（各表记录数）
 
 ## 对话导入
 
@@ -74,7 +83,7 @@ git checkout $ORIGINAL_BRANCH
 
 ```bash
 ORIGINAL_BRANCH=$(git rev-parse --abbrev-ref HEAD)
-git fetch origin
+git fetch origin conversations-backup
 git checkout conversations-backup 2>/dev/null || git checkout -b conversations-backup origin/main
 ```
 
@@ -104,6 +113,69 @@ git checkout $ORIGINAL_BRANCH
 ```
 
 7. 向用户报告导入结果
+
+## 批量对话备份
+
+当用户提到"批量对话备份"时，对多个项目目录依次执行对话备份。
+
+### 流程
+
+1. **执行一次前置检查**（使用当前工作目录）：
+
+```bash
+node C:/Users/Administrator/.claude/skills/conversation-backup/scripts/check_session.js
+```
+
+   - 如果 `is_new_session: false`：终止流程，提示用户新建对话
+   - 如果 `is_new_session: true`：记录 `session_id`，继续
+
+2. **依次处理用户指定的目录列表**，对每个目录执行以下步骤：
+
+   a. **检查目录是否存在**：不存在则跳过，记录到跳过列表
+   b. **检查是否为 git 仓库**：在目录中执行 `git rev-parse --is-inside-work-tree`，失败则跳过
+   c. **执行单项目备份流程**（与上方「对话备份」章节完全一致）：
+      - 记录当前分支，切换到 `conversations-backup` 分支
+      - 运行 export 脚本（传入该目录的绝对路径和 `session_id`）
+      - git add + commit + push
+      - 切回原分支
+   d. 记录该目录的执行结果（成功/失败/跳过）
+
+3. **汇总报告**：向用户展示所有目录的执行结果，包括：
+   - 成功备份的目录及各表记录数
+   - 跳过的目录及原因
+   - 失败的目录及错误信息
+
+## 批量对话导入
+
+当用户提到"批量对话导入"时，对多个项目目录依次执行对话导入。
+
+### 流程
+
+1. **执行一次前置检查**（使用当前工作目录）：
+
+```bash
+node C:/Users/Administrator/.claude/skills/conversation-backup/scripts/check_session.js
+```
+
+   - 如果 `is_new_session: false`：终止流程，提示用户新建对话
+   - 如果 `is_new_session: true`：继续
+
+2. **依次处理用户指定的目录列表**，对每个目录执行以下步骤：
+
+   a. **检查目录是否存在**：不存在则跳过，记录到跳过列表
+   b. **检查是否为 git 仓库**：在目录中执行 `git rev-parse --is-inside-work-tree`，失败则跳过
+   c. **执行单项目导入流程**（与上方「对话导入」章节完全一致）：
+      - 记录当前分支，切换到 `conversations-backup` 分支
+      - 运行 dry-run 预览
+      - 询问用户确认（批量模式下可一次性确认所有目录）
+      - 执行实际导入
+      - 切回原分支
+   d. 记录该目录的执行结果（成功/失败/跳过）
+
+3. **汇总报告**：向用户展示所有目录的执行结果，包括：
+   - 成功导入的目录及各表记录数
+   - 跳过的目录及原因
+   - 失败的目录及错误信息
 
 ## 注意事项
 
