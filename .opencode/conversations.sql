@@ -1,6 +1,6 @@
 -- OPENCODE_CONVERSATION_BACKUP
 -- version: 1
--- export_time: 2026-07-26T18:30:41.268Z
+-- export_time: 2026-07-26T19:53:13.687Z
 -- git_remote: git@github.com:TangGuoNiuBi/opencode-conversation-sync.git
 -- source_worktree: {{WORKTREE}}
 -- source_project_id: {{PROJECT_ID}}
