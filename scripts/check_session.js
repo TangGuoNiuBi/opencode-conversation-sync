@@ -3,14 +3,21 @@ const { DatabaseSync } = require('node:sqlite');
 const os = require('os');
 const path = require('path');
 
-const worktree = process.cwd().replace(/\\/g, '/');
+const computedWorktree = process.cwd().replace(/\\/g, '/');
 
 const dbPath = path.join(os.homedir(), '.local', 'share', 'opencode', 'opencode.db');
 const db = new DatabaseSync(dbPath, { readOnly: true });
 
-const project = db.prepare(
+let project = db.prepare(
   'SELECT id FROM project WHERE worktree = ?'
-).get(worktree);
+).get(computedWorktree);
+
+let worktree = computedWorktree;
+if (!project) {
+  const altWorktree = '/' + computedWorktree;
+  project = db.prepare('SELECT id FROM project WHERE worktree = ?').get(altWorktree);
+  if (project) worktree = altWorktree;
+}
 
 let session;
 if (project) {

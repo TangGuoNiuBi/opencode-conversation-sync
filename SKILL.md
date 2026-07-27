@@ -12,7 +12,7 @@ description: 当用户提到"对话备份"时导出当前项目的 opencode 对�
 本 skill 的脚本位于 SKILL.md 同级 `scripts/` 目录下，执行时需使用绝对路径：
 
 ```
-C:/Users/Administrator/.claude/skills/conversation-backup/scripts/
+~/.config/opencode/skills/conversation-backup/scripts/
 ```
 
 ## 前置检查（必须首先执行）
@@ -22,7 +22,7 @@ C:/Users/Administrator/.claude/skills/conversation-backup/scripts/
 1. 运行检查脚本：
 
 ```bash
-node C:/Users/Administrator/.claude/skills/conversation-backup/scripts/check_session.js
+node ~/.config/opencode/skills/conversation-backup/scripts/check_session.js
 ```
 
 2. 检查输出的 JSON：
@@ -46,20 +46,32 @@ git checkout conversations-backup 2>/dev/null || git checkout -b conversations-b
 2. **预导入检查**：检查 `.opencode/conversations.sql` 是否存在，如果存在则运行 dry-run 检查是否有本地缺失的会话：
 
 ```bash
-node C:/Users/Administrator/.claude/skills/conversation-backup/scripts/import_conversations.js --dry-run --ignore-existing "<项目目录>"
+node ~/.config/opencode/skills/conversation-backup/scripts/import_conversations.js --dry-run --ignore-existing "<项目目录>"
 ```
 
    - 如果 `session_analysis.new_count > 0`：执行预导入（使用 `--yes --ignore-existing`），只添加本地缺失的会话
    - 如果 `session_analysis.new_count == 0` 或 SQL 文件不存在：跳过预导入
 
-3. 运行导出脚本，排除当前对话（将 `<项目目录>` 替换为当前项目的绝对路径，`<session_id>` 替换为前置检查中获取的当前对话 ID）：
+3. 运行导出脚本前，使用 `question` 工具询问用户是否导出 event 表：
 
-```bash
-node C:/Users/Administrator/.claude/skills/conversation-backup/scripts/export_conversations.js --exclude-session <session_id> "<项目目录>"
-```
+   - **问题**：「是否导出 event 表？」
+   - **选项 1**：「导出 event 表（推荐）」— 完整备份，导入后可无缝继续对话，但 SQL 文件较大（event 表通常占 90%+ 体积）
+   - **选项 2**：「不导出 event 表」— SQL 文件体积小（仅几 MB），导入后可查看历史消息和会话列表，但在新设备上继续对话时可能出现状态异常
 
-4. 检查输出的 JSON，确认 `success: true` 并查看各表导出的记录数
-5. 使用输出中的 `commit_message` 字段作为 git commit message，**必须完整使用，不得截断或省略任何内容**（包括各对话详情列表）：
+4. 根据用户选择运行导出脚本，排除当前对话（将 `<项目目录>` 替换为当前项目的绝对路径，`<session_id>` 替换为前置检查中获取的当前对话 ID）：
+
+   - 如果用户选择导出 event 表：
+   ```bash
+   node ~/.config/opencode/skills/conversation-backup/scripts/export_conversations.js --exclude-session <session_id> "<项目目录>"
+   ```
+
+   - 如果用户选择不导出 event 表：
+   ```bash
+   node ~/.config/opencode/skills/conversation-backup/scripts/export_conversations.js --exclude-session <session_id> --no-events "<项目目录>"
+   ```
+
+5. 检查输出的 JSON，确认 `success: true` 并查看各表导出的记录数
+6. 使用输出中的 `commit_message` 字段作为 git commit message，**必须完整使用，不得截断或省略任何内容**（包括各对话详情列表）：
 
 ```bash
 git add .opencode/conversations.sql
@@ -90,7 +102,7 @@ git checkout conversations-backup 2>/dev/null || git checkout -b conversations-b
 2. 先运行 dry-run 预览：
 
 ```bash
-node C:/Users/Administrator/.claude/skills/conversation-backup/scripts/import_conversations.js --dry-run "<项目目录>"
+node ~/.config/opencode/skills/conversation-backup/scripts/import_conversations.js --dry-run "<项目目录>"
 ```
 
 3. 将预览结果展示给用户，包括：
@@ -103,7 +115,7 @@ node C:/Users/Administrator/.claude/skills/conversation-backup/scripts/import_co
 5. 用户确认后执行实际导入：
 
 ```bash
-node C:/Users/Administrator/.claude/skills/conversation-backup/scripts/import_conversations.js --yes "<项目目录>"
+node ~/.config/opencode/skills/conversation-backup/scripts/import_conversations.js --yes "<项目目录>"
 ```
 
 6. 切回用户原来的分支：
@@ -114,6 +126,8 @@ git checkout $ORIGINAL_BRANCH
 
 7. 向用户报告导入结果
 
+8. **重要提示**：告知用户需要**完全退出并重新启动 opencode** 才能看到导入的对话。仅刷新页面不够，因为 opencode 在启动时加载会话列表到内存缓存中，外部数据库修改不会被自动感知。
+
 ## 批量对话备份
 
 当用户提到"批量对话备份"时，对多个项目目录**并行**执行对话备份。
@@ -123,7 +137,7 @@ git checkout $ORIGINAL_BRANCH
 1. **执行一次前置检查**（使用当前工作目录）：
 
 ```bash
-node C:/Users/Administrator/.claude/skills/conversation-backup/scripts/check_session.js
+node ~/.config/opencode/skills/conversation-backup/scripts/check_session.js
 ```
 
    - 如果 `is_new_session: false`：终止流程，提示用户新建对话
@@ -131,15 +145,20 @@ node C:/Users/Administrator/.claude/skills/conversation-backup/scripts/check_ses
 
 2. **预筛选目录列表**：对用户指定的每个目录，检查是否存在且为 git 仓库，过滤出有效目录
 
-3. **并行执行备份**：对每个有效目录启动一个 `@bash` 子 agent **并行**执行（导出脚本以只读模式访问 DB，各目录 git 操作互不干扰）：
+3. **询问是否导出 event 表**：使用 `question` 工具询问用户（与单项目备份相同的问题和选项）：
+   - **问题**：「是否导出 event 表？」
+   - **选项 1**：「导出 event 表（推荐）」— 完整备份，导入后可无缝继续对话，但 SQL 文件较大（event 表通常占 90%+ 体积）
+   - **选项 2**：「不导出 event 表」— SQL 文件体积小（仅几 MB），导入后可查看历史消息和会话列表，但在新设备上继续对话时可能出现状态异常
+
+4. **并行执行备份**：对每个有效目录启动一个 `@bash` 子 agent **并行**执行（导出脚本以只读模式访问 DB，各目录 git 操作互不干扰）：
    - 记录当前分支，切换到 `conversations-backup` 分支
    - 预导入检查（如有缺失会话则用 `--ignore-existing` 导入）
-   - 运行 export 脚本（传入该目录的绝对路径和 `session_id`）
+   - 运行 export 脚本（传入该目录的绝对路径和 `session_id`，根据用户选择决定是否加 `--no-events`）
    - git add + commit + push
    - 切回原分支
    - 返回执行结果（成功/失败及详情）
 
-4. **汇总报告**：所有子 agent 完成后，向用户展示所有目录的执行结果，包括：
+5. **汇总报告**：所有子 agent 完成后，向用户展示所有目录的执行结果，包括：
    - 成功备份的目录及各表记录数
    - 跳过的目录及原因
    - 失败的目录及错误信息
@@ -155,7 +174,7 @@ node C:/Users/Administrator/.claude/skills/conversation-backup/scripts/check_ses
 1. **执行一次前置检查**（使用当前工作目录）：
 
 ```bash
-node C:/Users/Administrator/.claude/skills/conversation-backup/scripts/check_session.js
+node ~/.config/opencode/skills/conversation-backup/scripts/check_session.js
 ```
 
    - 如果 `is_new_session: false`：终止流程，提示用户新建对话
@@ -176,7 +195,7 @@ node C:/Users/Administrator/.claude/skills/conversation-backup/scripts/check_ses
 
    b. 运行 dry-run 预览：
    ```bash
-   node C:/Users/Administrator/.claude/skills/conversation-backup/scripts/import_conversations.js --dry-run "<项目目录>"
+   node ~/.config/opencode/skills/conversation-backup/scripts/import_conversations.js --dry-run "<项目目录>"
    ```
 
    c. 记录该目录的 dry-run 结果和原始分支名，**立即继续处理下一个目录**
@@ -190,7 +209,7 @@ node C:/Users/Administrator/.claude/skills/conversation-backup/scripts/check_ses
    a. 切换到该目录的 `conversations-backup` 分支（如果不在该分支上）
    b. 执行实际导入：
    ```bash
-   node C:/Users/Administrator/.claude/skills/conversation-backup/scripts/import_conversations.js --yes "<项目目录>"
+   node ~/.config/opencode/skills/conversation-backup/scripts/import_conversations.js --yes "<项目目录>"
    ```
    c. **必须展示每个目录的导入命令输出**，不得省略或编造结果
 
@@ -205,6 +224,8 @@ node C:/Users/Administrator/.claude/skills/conversation-backup/scripts/check_ses
    - 成功导入的目录及各表记录数
    - 跳过的目录及原因
    - 失败的目录及错误信息
+
+8. **重要提示**：告知用户需要**完全退出并重新启动 opencode** 才能看到导入的对话。仅刷新页面不够，因为 opencode 在启动时加载会话列表到内存缓存中。
 
 ## 注意事项
 

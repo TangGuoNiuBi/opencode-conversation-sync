@@ -27,7 +27,7 @@ if (!mode) {
 
 if (!projectDir) projectDir = process.cwd();
 
-const worktree = projectDir.replace(/\\/g, '/');
+const computedWorktree = projectDir.replace(/\\/g, '/');
 const sqlPath = path.join(projectDir, '.opencode', 'conversations.sql');
 
 if (!fs.existsSync(sqlPath)) {
@@ -51,9 +51,16 @@ if (!fs.existsSync(dbPath)) {
 
 const db = new DatabaseSync(dbPath);
 
-const localProject = db.prepare(
-  'SELECT id FROM project WHERE worktree = ?'
-).get(worktree);
+let localProject = db.prepare(
+  'SELECT id, worktree FROM project WHERE worktree = ?'
+).get(computedWorktree);
+
+let worktree = computedWorktree;
+if (!localProject) {
+  const altWorktree = '/' + computedWorktree;
+  localProject = db.prepare('SELECT id, worktree FROM project WHERE worktree = ?').get(altWorktree);
+  if (localProject) worktree = altWorktree;
+}
 
 let localProjectId;
 if (localProject) {
@@ -65,9 +72,15 @@ if (localProject) {
 
 db.close();
 
-sql = replaceAll(sql, '{{WORKTREE}}', worktree);
-sql = replaceAll(sql, '{{WORKTREE}}'.replace(/\//g, '\\\\'), worktree.replace(/\//g, '\\'));
+sql = replaceAll(sql, '{{WORKTREE}}', computedWorktree);
+sql = replaceAll(sql, '{{WORKTREE}}'.replace(/\//g, '\\\\'), computedWorktree.replace(/\//g, '\\'));
 sql = replaceAll(sql, '{{PROJECT_ID}}', localProjectId);
+if (worktree !== computedWorktree) {
+  sql = sql.replace(
+    new RegExp(`(INSERT OR (?:REPLACE|IGNORE) INTO project \\([^)]*worktree[^)]*\\) VALUES[^;]*?)'${computedWorktree.replace(/[.*+?^${}()|[\]]/g, '\\$&')}'`, 'g'),
+    `$1'${worktree}'`
+  );
+}
 
 const insertCount = (sql.match(/^INSERT /gm) || []).length;
 
@@ -79,10 +92,9 @@ if (localProject) {
   ).all(localProjectId).map(s => s.id);
   
   const sqlSessionIds = [];
-  const sessionInsertMatch = sql.match(/INSERT OR REPLACE INTO session[^;]+VALUES\s*([\s\S]*?);/);
-  if (sessionInsertMatch) {
-    const valuesPart = sessionInsertMatch[1];
-    const idMatches = valuesPart.matchAll(/\('ses_[a-zA-Z0-9]+'/g);
+  const sessionInsertBlocks = sql.matchAll(/INSERT OR (?:REPLACE|IGNORE) INTO session\b[^;]+;/g);
+  for (const block of sessionInsertBlocks) {
+    const idMatches = block[0].matchAll(/\('ses_[a-zA-Z0-9]+'/g);
     for (const m of idMatches) {
       sqlSessionIds.push(m[0].slice(2, -1));
     }
@@ -120,26 +132,31 @@ if (ignoreExisting) {
 }
 
 const importDb = new DatabaseSync(dbPath);
-importDb.exec('PRAGMA foreign_keys = OFF');
+importDb.prepare('PRAGMA foreign_keys = OFF').run();
+const fkStatus = importDb.prepare('PRAGMA foreign_keys').get();
+if (fkStatus.foreign_keys !== 0) {
+  console.error('WARNING: Failed to disable foreign keys! CASCADE deletes may occur.');
+}
 importDb.exec('BEGIN TRANSACTION');
 try {
   importDb.exec(sql);
-  importDb.exec(`
-    UPDATE event_sequence
-    SET seq = (SELECT MAX(e.seq) FROM event e WHERE e.aggregate_id = event_sequence.aggregate_id)
-    WHERE aggregate_id IN (
-      SELECT es.aggregate_id FROM event_sequence es
-      JOIN event e ON e.aggregate_id = es.aggregate_id
-      GROUP BY es.aggregate_id
-      HAVING es.seq < MAX(e.seq)
-    )
-  `);
+  if (sql.includes('INSERT OR REPLACE INTO event ')) {
+    importDb.exec(`
+      UPDATE event_sequence
+      SET seq = (SELECT MAX(e.seq) FROM event e WHERE e.aggregate_id = event_sequence.aggregate_id)
+      WHERE aggregate_id IN (
+        SELECT es.aggregate_id FROM event_sequence es
+        JOIN event e ON e.aggregate_id = es.aggregate_id
+        GROUP BY es.aggregate_id
+      )
+    `);
+  }
   importDb.exec('COMMIT');
-  importDb.exec('PRAGMA foreign_keys = ON');
+  importDb.prepare('PRAGMA foreign_keys = ON').run();
   console.log(`\nImport completed: ${insertCount} INSERT statements executed.`);
 } catch (err) {
   try { importDb.exec('ROLLBACK'); } catch {}
-  try { importDb.exec('PRAGMA foreign_keys = ON'); } catch {}
+  try { importDb.prepare('PRAGMA foreign_keys = ON').run(); } catch {}
   console.error(`Import failed: ${err.message}`);
   process.exit(1);
 }

@@ -7,17 +7,20 @@ const os = require('os');
 
 let projectDir = null;
 let excludeSessionId = null;
+let includeEvents = true;
 
 for (let i = 2; i < process.argv.length; i++) {
   if (process.argv[i] === '--exclude-session') {
     excludeSessionId = process.argv[++i];
+  } else if (process.argv[i] === '--no-events') {
+    includeEvents = false;
   } else {
     projectDir = path.resolve(process.argv[i]);
   }
 }
 
 if (!projectDir) projectDir = process.cwd();
-const worktree = projectDir.replace(/\\/g, '/');
+const computedWorktree = projectDir.replace(/\\/g, '/');
 
 const dbPath = path.join(os.homedir(), '.local', 'share', 'opencode', 'opencode.db');
 if (!fs.existsSync(dbPath)) {
@@ -27,12 +30,19 @@ if (!fs.existsSync(dbPath)) {
 
 const db = new DatabaseSync(dbPath, { readOnly: true });
 
-const project = db.prepare(
+let project = db.prepare(
   'SELECT * FROM project WHERE worktree = ?'
-).get(worktree);
+).get(computedWorktree);
+
+let worktree = computedWorktree;
+if (!project) {
+  const altWorktree = '/' + computedWorktree;
+  project = db.prepare('SELECT * FROM project WHERE worktree = ?').get(altWorktree);
+  if (project) worktree = altWorktree;
+}
 
 if (!project) {
-  console.error(`Project not found for worktree: ${worktree}`);
+  console.error(`Project not found for worktree: ${computedWorktree}`);
   process.exit(1);
 }
 
@@ -86,11 +96,30 @@ const sessionMessages = sessionIds.length > 0
     ).all(...sessionIds)
   : [];
 
+const sessionInputs = sessionIds.length > 0
+  ? db.prepare(
+      `SELECT * FROM session_input WHERE session_id IN (${sessionIds.map(() => '?').join(',')})`
+    ).all(...sessionIds)
+  : [];
+
+const sessionContextEpochs = sessionIds.length > 0
+  ? db.prepare(
+      `SELECT * FROM session_context_epoch WHERE session_id IN (${sessionIds.map(() => '?').join(',')})`
+    ).all(...sessionIds)
+  : [];
+
 const eventSequences = sessionIds.length > 0
   ? db.prepare(
       `SELECT * FROM event_sequence WHERE aggregate_id IN (${sessionIds.map(() => '?').join(',')})`
     ).all(...sessionIds)
   : [];
+
+let events = [];
+if (includeEvents && sessionIds.length > 0) {
+  events = db.prepare(
+    `SELECT * FROM event WHERE aggregate_id IN (${sessionIds.map(() => '?').join(',')})`
+  ).all(...sessionIds);
+}
 
 const projectDirs = db.prepare(
   'SELECT * FROM project_directory WHERE project_id = ?'
@@ -108,9 +137,12 @@ lines.push(`-- source_project_id: ${projectId}`);
 lines.push(`-- session_count: ${sessions.length}`);
 lines.push(`-- message_count: ${messages.length}`);
 lines.push(`-- part_count: ${parts.length}`);
+lines.push(`-- event_count: ${events.length}`);
 lines.push(`-- event_sequence_count: ${eventSequences.length}`);
 lines.push(`-- todo_count: ${todos.length}`);
 lines.push(`-- session_message_count: ${sessionMessages.length}`);
+lines.push(`-- session_input_count: ${sessionInputs.length}`);
+lines.push(`-- session_context_epoch_count: ${sessionContextEpochs.length}`);
 lines.push('');
 
 const projectCols = ['id', 'worktree', 'vcs', 'name', 'icon_url', 'icon_color',
@@ -136,18 +168,29 @@ if (todos.length > 0) {
 if (sessionMessages.length > 0) {
   lines.push(genInsert('session_message', getCols('session_message', sessionMessages[0]), sessionMessages));
 }
+if (sessionInputs.length > 0) {
+  lines.push(genInsert('session_input', getCols('session_input', sessionInputs[0]), sessionInputs));
+}
+if (sessionContextEpochs.length > 0) {
+  lines.push(genInsert('session_context_epoch', getCols('session_context_epoch', sessionContextEpochs[0]), sessionContextEpochs));
+}
 if (eventSequences.length > 0) {
   lines.push(genInsert('event_sequence', getCols('event_sequence', eventSequences[0]), eventSequences));
+}
+if (events.length > 0) {
+  lines.push(genInsert('event', ['id', 'aggregate_id', 'seq', 'type', 'data'], events));
 }
 
 let sql = lines.join('\n');
 
 sql = replaceAll(sql, projectId, '{{PROJECT_ID}}');
-
-const segments = worktree.split('/').filter(Boolean);
-const escapedSegs = segments.map(s => s.replace(/[.*+?^${}()|[\]]/g, '\\$&'));
-const pathRegex = new RegExp(escapedSegs.join('[/\\\\]+'), 'g');
-sql = sql.replace(pathRegex, '{{WORKTREE}}');
+sql = replaceAll(sql, worktree, '{{WORKTREE}}');
+sql = replaceAll(sql, worktree.replace(/\//g, '\\'), '{{WORKTREE}}');
+if (worktree.startsWith('/')) {
+  const withoutLeading = worktree.substring(1);
+  sql = replaceAll(sql, withoutLeading, '{{WORKTREE}}');
+  sql = replaceAll(sql, withoutLeading.replace(/\//g, '\\'), '{{WORKTREE}}');
+}
 
 const outDir = path.join(projectDir, '.opencode');
 if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
@@ -191,9 +234,12 @@ console.log(JSON.stringify({
     session: sessions.length,
     message: messages.length,
     part: parts.length,
+    event: events.length,
     event_sequence: eventSequences.length,
     todo: todos.length,
     session_message: sessionMessages.length,
+    session_input: sessionInputs.length,
+    session_context_epoch: sessionContextEpochs.length,
   }
 }, null, 2));
 
